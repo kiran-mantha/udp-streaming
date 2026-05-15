@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Live Stream</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; flex-direction: column; }
+        video { width: 100%; max-width: 960px; display: none; }
+        video.active { display: block; }
+        #status { color: #888; font-family: sans-serif; text-align: center; padding: 20px; }
+        #status .label { font-size: 18px; margin-bottom: 8px; }
+        #status .detail { font-size: 13px; color: #555; }
+    </style>
+</head>
+<body>
+    <div id="status">
+        <div class="label">Waiting for stream...</div>
+        <div class="detail" id="detail">Connecting</div>
+    </div>
+    <video id="video" controls autoplay playsinline></video>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+        var statusEl = document.getElementById('status');
+        var detailEl = document.getElementById('detail');
+        var video = document.getElementById('video');
+        var hls = null;
+
+        function showStatus(label, detail) {
+            statusEl.style.display = '';
+            video.classList.remove('active');
+            statusEl.querySelector('.label').textContent = label;
+            detailEl.textContent = detail;
+        }
+
+        function showVideo() {
+            statusEl.style.display = 'none';
+            video.classList.add('active');
+        }
+
+        function initHls() {
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
+            if (!Hls.isSupported()) {
+                if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = '/live/stream.m3u8';
+                    video.addEventListener('loadedmetadata', function () { video.play(); });
+                    video.addEventListener('error', function () {
+                        showStatus('Stream unavailable', 'Check that receiver is running');
+                    });
+                    showStatus('Loading...', '');
+                    return;
+                }
+                showStatus('HLS not supported', 'Use a modern browser');
+                return;
+            }
+            hls = new Hls({
+                liveSyncDurationCount: 5,
+                maxBufferLength: 30,
+                maxMaxBufferLength: 30
+            });
+            hls.loadSource('/live/stream.m3u8');
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, function () {
+                showVideo();
+                video.play();
+            });
+            hls.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                    var detail = '';
+                    if (data.response) detail = 'HTTP ' + data.response.code;
+                    showStatus('Stream unavailable', detail);
+                    setTimeout(initHls, 3000);
+                }
+            });
+        }
+
+        function pollStream() {
+            fetch('/stream/status').then(function (r) { return r.json(); }).then(function (s) {
+                if (s.status === 'live') {
+                    showStatus('Starting stream...', '');
+                    initHls();
+                } else {
+                    var msgs = {'starting': 'Receiver starting...', 'disconnected': 'Waiting for camera', 'offline': 'Receiver offline'};
+                    var label = msgs[s.status] || 'Waiting';
+                    detailEl.textContent = label + ' (' + Math.round(s.uptime_seconds || 0) + 's)';
+                    setTimeout(pollStream, 2000);
+                }
+            }).catch(function () {
+                detailEl.textContent = 'Server unreachable';
+                setTimeout(pollStream, 3000);
+            });
+        }
+
+        pollStream();
+    </script>
+</body>
+</html>

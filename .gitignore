@@ -1,0 +1,11 @@
+# virtual environment
+**/venv/
+
+# buffer videos
+**/buffer/
+
+# videos
+**/videos/
+
+# cache
+**/__pycache__/
